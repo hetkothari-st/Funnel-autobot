@@ -1,0 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    /* Deep dark modern gradient background */
+    @apply bg-gradient-to-br from-[#020617] via-[#09090b] to-[#01030e] text-white font-sans antialiased overflow-hidden selection:bg-blue-500/30 min-h-screen relative;
+  }
+}
+
+/* Subtle animated background noise/grid (Optional, adds premium feel) */
+body::before {
+  content: '';
+  @apply absolute inset-0 opacity-[0.03] pointer-events-none;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: linear-gradient(to bottom, black 40%, transparent);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Base custom scrollbar class specifically for inner containers */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Upgraded Glassmorphism utilities */
+.glass-panel {
+  @apply bg-[#0f1115]/50 backdrop-blur-xl border border-white/[0.08] shadow-2xl;
+}
+
+.glass-card {
+  @apply bg-[#15171c]/60 backdrop-blur-md border border-white/[0.05] shadow-xl relative overflow-hidden transition-all duration-300;
+}
+
+.glass-card:hover {
+  @apply border-white/[0.1] shadow-2xl;
+}
+
+/* Top internal highlight to mimic thick glass */
+.glass-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+}

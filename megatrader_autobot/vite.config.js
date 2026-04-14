@@ -1,0 +1,20 @@
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5174,
+    allowedHosts: true,
+    host: true,
+    proxy: {
+      '/megatrader-api': {
+        target: 'http://192.168.6.164:16006',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/megatrader-api/, ''),
+        secure: false
+      }
+    }
+  }
+})

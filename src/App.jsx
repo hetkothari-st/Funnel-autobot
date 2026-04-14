@@ -1,17 +1,21 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Database, Plus, Trash2, LayoutGrid, Monitor, Eye, EyeOff, CheckSquare, Square, PanelLeftClose, PanelLeft, Columns } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Activity, Database, Plus, Trash2, LayoutGrid, Monitor, Eye, EyeOff, CheckSquare, Square, PanelLeftClose, PanelLeft, Columns, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMarketData } from './hooks/useMarketData';
 import MonitorDashboard from './components/MonitorDashboard';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import logo from '/Doc1-removebg-preview.png';
+import { useAuth, buildWsCredential } from './auth/AuthContext';
+import LoginPage from './auth/LoginPage';
 
 function cn(...inputs) {
     return twMerge(clsx(inputs));
 }
 
 const App = () => {
+    const { user, logout } = useAuth();
+    const wsCredential = useMemo(() => buildWsCredential(user), [user]);
     // --- Global State ---
     const [debugLogs, setDebugLogs] = useState([]);
 
@@ -44,6 +48,9 @@ const App = () => {
 
     // Sidebar Collapse State (only for Vertical mode)
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+    // Autobot Terminal Visibility State
+    const [isAutobotVisible, setIsAutobotVisible] = useState(false);
 
     useEffect(() => {
         localStorage.setItem('mt_monitors_list', JSON.stringify(monitors));
@@ -90,7 +97,7 @@ const App = () => {
         depthEvents.current.dispatchEvent(new CustomEvent('depth-packet', { detail: packet }));
     }, []);
 
-    const { status, depthData, subscribe } = useMarketData(isWsEnabled, handleRawMessage, handleDepthPacket);
+    const { status, depthData, subscribe } = useMarketData(isWsEnabled, wsCredential, handleRawMessage, handleDepthPacket);
 
     // --- Global Notification Logic ---
     const addGlobalNotification = useCallback((details) => {
@@ -102,6 +109,42 @@ const App = () => {
             setActiveNotifications(prev => prev.filter(n => n.id !== details.id));
         }, 5000);
     }, []);
+
+    // --- Sync Autobot Tokens ---
+    const [allMonitorTokens, setAllMonitorTokens] = useState({});
+
+    const handleSyncTokens = useCallback((monitorId, tokensPayload) => {
+        setAllMonitorTokens(prev => {
+            if (JSON.stringify(prev[monitorId]) === JSON.stringify(tokensPayload)) return prev;
+            return { ...prev, [monitorId]: tokensPayload };
+        });
+    }, []);
+
+    // Broadcast aggregated tokens to the embedded Autobot whenever they change
+    const syncToAutobot = useCallback(() => {
+        const iframe = document.getElementById('autobot-iframe');
+        if (iframe && iframe.contentWindow) {
+            const flatTokens = Object.values(allMonitorTokens).flat();
+            iframe.contentWindow.postMessage({ type: 'SYNC_STRATEGY_TOKENS', tokens: flatTokens, activeMonitorId }, '*');
+        }
+    }, [allMonitorTokens, activeMonitorId]);
+
+    useEffect(() => {
+        syncToAutobot();
+    }, [syncToAutobot]);
+
+    // --- Forward depth data to Autobot iframe ---
+    useEffect(() => {
+        if (!isAutobotVisible) return;
+        const iframe = document.getElementById('autobot-iframe');
+        if (!iframe?.contentWindow) return;
+        if (!depthData || Object.keys(depthData).length === 0) return;
+
+        iframe.contentWindow.postMessage({
+            type: 'DEPTH_DATA_UPDATE',
+            depthData
+        }, '*');
+    }, [depthData, isAutobotVisible]);
 
     // --- Monitor Management ---
     const handleAddMonitor = () => {
@@ -159,6 +202,9 @@ const App = () => {
     // Sidebar Visibility Logic
     // Controlled by sidebarCollapsed in both modes
     const isSidebarVisible = !sidebarCollapsed;
+
+    // Auth gate — MUST be after all hooks
+    if (!user) return <LoginPage />;
 
     return (
         <div className="min-h-screen bg-[#050505] text-white flex h-screen overflow-hidden font-sans selection:bg-blue-500/30">
@@ -235,12 +281,35 @@ const App = () => {
                             <Columns size={12} /> Columns
                         </button>
                     </div>
+                    <button
+                        onClick={() => setIsAutobotVisible(!isAutobotVisible)}
+                        className={cn("w-full mt-2 py-1.5 rounded text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all",
+                            isAutobotVisible ? "bg-purple-600/30 text-purple-400 border border-purple-500/30 shadow-[0_0_10px_rgba(168,85,247,0.2)]" : "bg-white/5 text-white/50 border border-transparent hover:bg-white/10 hover:text-white"
+                        )}
+                    >
+                        <Monitor size={12} />
+                        {isAutobotVisible ? "Hide Autobot Terminal" : "Show Autobot Terminal"}
+                    </button>
                 </div>
 
                 {/* Section 1: Watchlist */}
                 <div className="p-3 overflow-y-auto max-h-[30vh] border-b border-white/5">
                     <p className="text-[10px] uppercase text-white/20 font-bold tracking-wider mb-2 px-1">Watchlist</p>
                     <div className="space-y-1">
+                        <button
+                            onClick={() => { setActiveMonitorId('global'); setIsAutobotVisible(true); }}
+                            className={cn(
+                                "w-full text-left px-3 py-2 rounded-lg transition-all text-xs flex items-center justify-between group mb-2 border",
+                                activeMonitorId === 'global'
+                                    ? "bg-purple-600/20 text-purple-400 border-purple-500/30 shadow-[0_0_10px_rgba(168,85,247,0.1)]"
+                                    : "border-transparent text-white/50 hover:bg-white/5 hover:text-white"
+                            )}
+                        >
+                            <span className="flex items-center gap-2 font-black uppercase tracking-widest text-[10px]">
+                                <Activity size={12} /> Global View
+                            </span>
+                        </button>
+
                         {monitors.map((m, idx) => (
                             <button
                                 key={m.id}
@@ -345,28 +414,92 @@ const App = () => {
                         ))}
                     </div>
                 </div>
+
+                {/* User + Logout */}
+                {user && (
+                    <div className="p-3 border-t border-white/5 mt-auto">
+                        <div className="flex items-center gap-2 px-1">
+                            <div className="w-6 h-6 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-[9px] font-black text-emerald-300 flex-shrink-0">
+                                {(user.name || user.email || '?').charAt(0).toUpperCase()}
+                            </div>
+                            <span className="text-[10px] font-bold text-white/50 truncate flex-1">{user.name || user.email}</span>
+                            <button
+                                onClick={logout}
+                                title="Sign out"
+                                className="p-1.5 rounded hover:bg-white/10 text-white/30 hover:text-red-400 transition-colors flex-shrink-0"
+                            >
+                                <LogOut size={12} />
+                            </button>
+                        </div>
+                    </div>
+                )}
             </aside>
 
             {/* --- MAIN CONTENT --- */}
-            <main className="flex-1 relative overflow-hidden bg-[#050505] p-3">
-                {monitors.map(m => (
-                    <MonitorDashboard
-                        key={m.id}
-                        id={m.id}
-                        isActive={activeMonitorId === m.id}
-                        depthData={depthData}
-                        status={status}
-                        subscribe={subscribe}
-                        addGlobalNotification={addGlobalNotification}
-                        visibleElements={monitorSettings[m.id]}
-                        onRemove={handleRemoveMonitor}
-                        layoutMode={monitorLayouts[m.id] || 'original'}
-                        onLayoutChange={(mode) => setMonitorLayouts(prev => ({ ...prev, [m.id]: mode }))}
-                        depthEvents={depthEvents.current} // Pass Event Bus
-                        isSidebarVisible={isSidebarVisible} // Pass Sidebar State
-                        onToggleSidebar={setSidebarCollapsed} // Pass Sidebar Toggle
-                    />
-                ))}
+            <main className="flex-1 relative overflow-hidden bg-[#050505] flex">
+                <div className={cn("flex-1 h-full overflow-hidden transition-all p-3 relative flex flex-col", isAutobotVisible ? "w-1/2 pr-0 flex-none" : "w-full")}>
+                    {activeMonitorId === 'global' ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-white/30 p-10 text-center glass-card rounded-2xl border border-white/5 bg-black/40">
+                            <Database size={48} className="mb-6 opacity-80 text-purple-400 drop-shadow-[0_0_15px_rgba(168,85,247,0.4)]" />
+                            <h2 className="text-xl font-black uppercase tracking-widest text-white/90 mb-3">Global Dashboard Active</h2>
+                            <p className="max-w-md text-sm leading-relaxed text-white/50">
+                                You are now viewing the consolidated state of all monitors within the Autobot Terminal.
+                                <br /><br />
+                                Please manage your live positions and global execution configurations directly in the Terminal on the right.
+                            </p>
+                            {!isAutobotVisible && (
+                                <button
+                                    onClick={() => setIsAutobotVisible(true)}
+                                    className="mt-8 px-6 py-2 bg-purple-600/20 text-purple-400 border border-purple-500/30 rounded-lg text-xs font-black uppercase tracking-widest hover:bg-purple-600 hover:text-white transition-all shadow-[0_0_15px_rgba(168,85,247,0.2)]"
+                                >
+                                    Open Terminal
+                                </button>
+                            )}
+                        </div>
+                    ) : (
+                        monitors.map(m => (
+                            <div key={m.id} className={cn("flex-1 h-full", activeMonitorId === m.id ? "block" : "hidden")}>
+                                <MonitorDashboard
+                                    id={m.id}
+                                    isActive={activeMonitorId === m.id}
+                                    depthData={depthData}
+                                    status={status}
+                                    subscribe={subscribe}
+                                    addGlobalNotification={addGlobalNotification}
+                                    visibleElements={monitorSettings[m.id]}
+                                    onRemove={handleRemoveMonitor}
+                                    layoutMode={monitorLayouts[m.id] || 'original'}
+                                    onLayoutChange={(mode) => setMonitorLayouts(prev => ({ ...prev, [m.id]: mode }))}
+                                    depthEvents={depthEvents.current}
+                                    isSidebarVisible={isSidebarVisible}
+                                    onToggleSidebar={setSidebarCollapsed}
+                                    onSyncTokens={handleSyncTokens}
+                                />
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                {isAutobotVisible && (
+                    <div className="w-1/2 h-full border-l border-white/10 bg-black flex-none flex flex-col shadow-[-10px_0_30px_rgba(0,0,0,0.5)] z-20">
+                        <div className="bg-[#0a0a0e] p-2 flex items-center justify-between border-b border-white/10">
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+                                <span className="text-xs font-black uppercase text-purple-400 tracking-widest">Autobot Terminal</span>
+                            </div>
+                            <button onClick={() => setIsAutobotVisible(false)} className="text-white/30 hover:text-rose-400 p-1 rounded-md transition-colors">
+                                <Trash2 size={12} />
+                            </button>
+                        </div>
+                        <iframe
+                            id="autobot-iframe"
+                            src={import.meta.env.DEV ? `http://${window.location.hostname}:5174` : '/autobot/'}
+                            className="flex-1 w-full h-full border-0 bg-transparent"
+                            title="Autobot Terminal"
+                            onLoad={syncToAutobot}
+                        />
+                    </div>
+                )}
             </main>
         </div>
     );

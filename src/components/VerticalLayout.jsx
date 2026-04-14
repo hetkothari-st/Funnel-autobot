@@ -20,6 +20,8 @@ const LogRow = memo(React.forwardRef(({ log, token, side, timeTick }, ref) => {
 
     const isHighQty = log.observedQty >= 90000;
 
+    const isRecent = elapsed <= 60;
+
     return (
         <motion.div
             ref={ref}
@@ -28,20 +30,26 @@ const LogRow = memo(React.forwardRef(({ log, token, side, timeTick }, ref) => {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="flex items-center justify-between gap-1 text-[13px] leading-tight px-1 py-0.5 rounded hover:bg-white/5 transition-colors border-b border-white/5 last:border-0 overflow-hidden"
+            className={cn(
+                "flex items-center justify-between gap-1 text-[13px] leading-tight px-1 py-0.5 rounded transition-all border-b last:border-0 overflow-hidden",
+                isRecent
+                    ? (isBuy ? "bg-emerald-500/20 border-emerald-500/35 shadow-[0_0_12px_rgba(16,185,129,0.3)]" : "bg-red-500/20 border-red-500/35 shadow-[0_0_12px_rgba(239,68,68,0.3)]")
+                    : "border-white/5 hover:bg-white/5 opacity-70"
+            )}
         >
             {isBuy ? (
                 <>
-                    <span className="text-[10px] text-blue-400 font-bold font-mono whitespace-nowrap shrink-0">{timerStr}</span>
+                    <span className={cn("text-[10px] font-bold font-mono whitespace-nowrap shrink-0", isRecent ? "text-blue-200" : "text-blue-500")}>{timerStr}</span>
                     <span className={cn(
                         "font-mono flex-1 text-center whitespace-nowrap min-w-0 truncate transition-all duration-300",
-                        isHighQty ? "text-amber-400 font-black text-[14.5px] drop-shadow-[0_0_8px_rgba(251,191,36,0.6)] tracking-tighter" : "text-emerald-400 font-bold text-[14px]"
+                        isHighQty ? "text-amber-400 font-black text-[14.5px] drop-shadow-[0_0_8px_rgba(251,191,36,0.6)] tracking-tighter" :
+                            isRecent ? "text-emerald-300 font-black text-[14.5px] drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]" : "text-emerald-500/80 font-bold text-[14px]"
                     )}>{log.observedQty}</span>
                     <span className={cn(
                         "font-mono whitespace-nowrap shrink-0 text-right transition-all duration-300",
                         isHighQty
                             ? "text-violet-200 font-black text-[14.5px] drop-shadow-[0_0_12px_rgba(167,139,250,1)]"
-                            : "text-violet-300 font-bold text-[13px]"
+                            : isRecent ? "text-violet-100 font-black text-[13.5px] drop-shadow-[0_0_5px_rgba(255,255,255,0.4)]" : "text-violet-400/80 font-bold text-[13px]"
                     )}>{Number(log.price).toFixed(2)}</span>
                 </>
             ) : (
@@ -50,13 +58,14 @@ const LogRow = memo(React.forwardRef(({ log, token, side, timeTick }, ref) => {
                         "font-mono whitespace-nowrap shrink-0 text-left transition-all duration-300",
                         isHighQty
                             ? "text-violet-200 font-black text-[14.5px] drop-shadow-[0_0_12px_rgba(167,139,250,1)]"
-                            : "text-violet-300 font-bold text-[13px]"
+                            : isRecent ? "text-violet-100 font-black text-[13.5px] drop-shadow-[0_0_5px_rgba(255,255,255,0.4)]" : "text-violet-400/80 font-bold text-[13px]"
                     )}>{Number(log.price).toFixed(2)}</span>
                     <span className={cn(
                         "font-mono flex-1 text-center whitespace-nowrap min-w-0 truncate transition-all duration-300",
-                        isHighQty ? "text-amber-400 font-black text-[14.5px] drop-shadow-[0_0_8px_rgba(251,191,36,0.6)] tracking-tighter" : "text-red-400 font-bold text-[13px]"
+                        isHighQty ? "text-amber-400 font-black text-[14.5px] drop-shadow-[0_0_8px_rgba(251,191,36,0.6)] tracking-tighter" :
+                            isRecent ? "text-red-300 font-black text-[14.5px] drop-shadow-[0_0_8px_rgba(239,68,68,0.8)]" : "text-red-500/80 font-bold text-[13px]"
                     )}>{log.observedQty}</span>
-                    <span className="text-[10px] text-blue-400 font-bold font-mono whitespace-nowrap shrink-0 text-right">{timerStr}</span>
+                    <span className={cn("text-[10px] font-bold font-mono whitespace-nowrap shrink-0 text-right", isRecent ? "text-blue-200" : "text-blue-500")}>{timerStr}</span>
                 </>
             )}
         </motion.div>
@@ -448,12 +457,21 @@ const VerticalLayout = ({
     timerSeconds,
     onUpdateTimerSeconds,
     triggerPriceValue,
-    onUpdateTriggerPrice
+    onUpdateTriggerPrice,
+    slicePercentage,
+    onUpdateSlicePercentage,
+    sellVolThreshold,
+    onUpdateSellVolThreshold,
+    sellMaxSLPts,
+    onUpdateSellMaxSLPts,
+    sellTrailing,
+    onUpdateSellTrailing
 }) => {
     // --- Top Bar State (Unchanged) ---
     const [globalIndex, setGlobalIndex] = useState('NIFTY');
     const [globalExpiry, setGlobalExpiry] = useState('');
-    const [atmStrike, setAtmStrike] = useState(null);
+    // Per-index ATM strikes map: { NIFTY: 24050, BANKNIFTY: 51200, SENSEX: 80100, ... }
+    const [atmStrikes, setAtmStrikes] = useState({});
     const [timeTick, setTimeTick] = useState(0);
     const [showNetQtyBreakdown, setShowNetQtyBreakdown] = useState(false);
     const isDraggingRef = useRef(false);
@@ -466,6 +484,12 @@ const VerticalLayout = ({
     const [tempTargetQty, setTempTargetQty] = useState(targetTotalQty);
     const [tempTimerSeconds, setTempTimerSeconds] = useState(timerSeconds);
     const [tempTriggerPrice, setTempTriggerPrice] = useState(triggerPriceValue);
+    const [tempSlicePercentage, setTempSlicePercentage] = useState(slicePercentage);
+    const [tempSellVolThreshold, setTempSellVolThreshold] = useState(sellVolThreshold);
+    const [tempSellMaxSLPts, setTempSellMaxSLPts] = useState(sellMaxSLPts);
+
+    // Throttle for activity sorting
+    const lastActivitySortRef = useRef(0);
 
     // Sync temp state if global changes (e.g. on mount)
     useEffect(() => {
@@ -474,7 +498,10 @@ const VerticalLayout = ({
         setTempTargetQty(targetTotalQty);
         setTempTimerSeconds(timerSeconds);
         setTempTriggerPrice(triggerPriceValue);
-    }, [autoOrderThreshold, autoOrderExecutionQty, targetTotalQty, timerSeconds, triggerPriceValue]);
+        setTempSlicePercentage(slicePercentage);
+        setTempSellVolThreshold(sellVolThreshold);
+        setTempSellMaxSLPts(sellMaxSLPts);
+    }, [autoOrderThreshold, autoOrderExecutionQty, targetTotalQty, timerSeconds, triggerPriceValue, slicePercentage, sellVolThreshold, sellMaxSLPts]);
 
     // --- Horizontal Auto-Scroll Logic ---
     useEffect(() => {
@@ -507,67 +534,108 @@ const VerticalLayout = ({
         return () => clearInterval(interval);
     }, []);
 
-    // --- Spot Price & ATM Logic ---
+    // --- Spot Price & ATM Logic (Multi-Index) ---
+    // All known indices and their spot tokens/steps
+    const INDEX_SPOT_MAP = useMemo(() => ({
+        NIFTY: { tokenId: '26000', step: 50 },
+        BANKNIFTY: { tokenId: '26009', step: 100 },
+        SENSEX: { tokenId: '1', step: 100 },
+    }), []);
+
     useEffect(() => {
         // Prevent auto-reorder while user is manually dragging
-        // Using ref check to avoid the "lock re-render" fighting the drag start
         if (isDraggingRef.current) return;
+        if (!depthData) return;
 
-        // 1. Get Spot Token ID based on Global Index
-        let spotTokenId = null;
-        let step = 50; // Default NIFTY Step
+        const newAtmStrikes = { ...atmStrikes }; // Copy previous state so we don't lose indices not updated in this tick
+        let changed = false;
+        let allAtmTokenIds = new Set(); // ATM token ids across ALL indices
 
-        if (globalIndex === 'NIFTY') { spotTokenId = '26000'; step = 50; }
-        else if (globalIndex === 'BANKNIFTY') { spotTokenId = '26009'; step = 100; }
-        // Add others if known, else skip
+        // Compute ATM for every known index
+        Object.entries(INDEX_SPOT_MAP).forEach(([indexName, { tokenId, step }]) => {
+            const spotPacket = depthData[tokenId];
+            if (!spotPacket) return;
 
-        if (!spotTokenId || !depthData || !depthData[spotTokenId]) return;
+            const spotPrice = parseFloat(spotPacket.Price || spotPacket.iv || spotPacket.ltp || spotPacket.LastTradedPrice || 0);
+            if (!spotPrice) return;
 
-        // 2. Get Spot Price
-        // IndexData packet structure usually has 'iv' (Index Value) or similar. 
-        // Based on typical NSE updates, it might be in `Touchline` format or specific `IndexData`.
-        // Let's assume standard `ltp` or `LastTradedPrice` or `iv` is available in the object.
-        // We enabled 'IndexData' flow, so let's inspect what we get. usually it's `LastTradedPrice` or `Close`.
-        // Ideally we check `rt` (Real Time) or `iv`. Let's fallback to `ltp`.
-        const spotPacket = depthData[spotTokenId];
-        // IndexData uses 'Price'. Depth uses 'ltp' or 'iv'.
-        const spotPrice = parseFloat(spotPacket.Price || spotPacket.iv || spotPacket.ltp || spotPacket.LastTradedPrice || 0);
+            const calculatedAtm = Math.round(spotPrice / step) * step;
 
-        if (!spotPrice) {
-            console.log(`[ATM] Spot Price missing for ${globalIndex} (${spotTokenId}):`, spotPacket);
-            return;
-        }
+            if (newAtmStrikes[indexName] !== calculatedAtm) {
+                newAtmStrikes[indexName] = calculatedAtm;
+                changed = true;
+                if (indexName === 'SENSEX') console.log(`[ATM] SENSEX ATM Updated: Spot=${spotPrice}, ATM=${calculatedAtm}`);
+            }
 
-        // 3. Calculate ATM Strike
-        const calculatedAtm = Math.round(spotPrice / step) * step;
+            // Find ATM tokens for this index
+            monitoredTokens.forEach(t => {
+                if (t.index === indexName && parseFloat(t.strike) === calculatedAtm) {
+                    allAtmTokenIds.add(t.id);
+                }
+            });
+        });
 
-        // 4. Update interactions ONLY if ATM changes
-        if (atmStrike !== calculatedAtm) {
-            setAtmStrike(calculatedAtm);
-        }
+        // Update per-index ATM map only when something changed
+        if (changed) setAtmStrikes(newAtmStrikes);
 
-        // 5. Auto-Reorder: Ensure ATM columns (CE & PE) are at front whenever tokens or ATM changes
-        const currentTokens = [...monitoredTokens];
-        const atmTokens = currentTokens.filter(t =>
-            t.index === globalIndex &&
-            parseFloat(t.strike) === calculatedAtm
-        );
+        // Auto-Reorder: move ALL ATM tokens to the front, sort the rest by activity
+        let orderChanged = false;
 
-        if (atmTokens.length > 0) {
-            // Check if all ATM tokens are already grouped at the very front
-            const firstNIds = monitoredTokens.slice(0, atmTokens.length).map(t => t.id);
-            const allAtFront = atmTokens.every(t => firstNIds.includes(t.id));
+        let expectedOrder = [...monitoredTokens]; // Default to current
 
-            if (!allAtFront) {
-                const nonAtmTokens = currentTokens.filter(t =>
-                    !(t.index === globalIndex && parseFloat(t.strike) === calculatedAtm)
-                );
-                // Maintain relative order of ATM tokens (CE/PE) as they were added
-                const newOrder = [...atmTokens, ...nonAtmTokens];
-                onReorderTokens(newOrder); // This updates the parent state
+        if (monitoredTokens.length > 0) {
+            // Count activity (number of log entries) for each token
+            const recentCounts = {};
+            const totalCounts = {};
+            const now = Date.now();
+
+            monitoredTokens.forEach(t => {
+                recentCounts[t.id] = 0;
+                totalCounts[t.id] = 0;
+            });
+
+            logs.forEach(log => {
+                const tId = log.tokenId || log.tkn;
+                if (totalCounts[tId] !== undefined) {
+                    totalCounts[tId]++;
+                    // Consider it recent activity if it arrived in the last 60 seconds
+                    if (now - (log.timestamp || 0) <= 60000) {
+                        recentCounts[tId]++;
+                    }
+                }
+            });
+
+            const atmTokens = monitoredTokens.filter(t => allAtmTokenIds.has(t.id));
+            const nonAtmTokens = monitoredTokens.filter(t => !allAtmTokenIds.has(t.id));
+
+            // Throttle Activity Sorting to prevent rapid jittering (every 3 seconds minimum)
+            if (now - lastActivitySortRef.current > 5000) {
+                // Sort non-ATM tokens by activity descending
+                nonAtmTokens.sort((a, b) => {
+                    // Primary sort: Recent activity (last 60 seconds)
+                    const recentDiff = recentCounts[b.id] - recentCounts[a.id];
+                    if (recentDiff !== 0) return recentDiff;
+
+                    // Secondary sort: Total all-time activity (if recent activity is the same)
+                    return totalCounts[b.id] - totalCounts[a.id];
+                });
+
+                // Only update the timestamp if we actually shifted non-ATM sequence compared to before.
+                // It's safe to always update it though for simple throttling.
+                lastActivitySortRef.current = now;
+            }
+
+            expectedOrder = [...atmTokens, ...nonAtmTokens];
+
+            // Check if actual order matches expected order
+            const isSameOrder = expectedOrder.every((t, i) => t.id === monitoredTokens[i]?.id);
+            if (!isSameOrder) {
+                onReorderTokens(expectedOrder);
             }
         }
-    }, [depthData, globalIndex, monitoredTokens, onReorderTokens, atmStrike]);
+
+        // Add logs to dependency array since activity sorting depends on it
+    }, [depthData, INDEX_SPOT_MAP, monitoredTokens, onReorderTokens, atmStrikes, logs]);
 
 
     const availableExpiries = useMemo(() => {
@@ -813,27 +881,85 @@ const VerticalLayout = ({
                                     <p className="text-[9px] text-white/30 leading-tight">Amount to actually Buy/Sell.</p>
                                 </div>
 
-                                {/* 5. Trigger Price */}
-                                <div className="bg-white/5 border border-white/5 rounded p-2 flex flex-col gap-1.5 hover:border-red-500/30 transition-colors group">
-                                    <label className="text-[9px] text-white/40 uppercase font-black tracking-widest group-hover:text-red-400 transition-colors">5. Stop Loss (Pts)</label>
+                                {/* 5. Order Qty % (Slice) */}
+                                <div className="bg-white/5 border border-white/5 rounded p-2 flex flex-col gap-1.5 hover:border-cyan-500/30 transition-colors group">
+                                    <label className="text-[9px] text-white/40 uppercase font-black tracking-widest group-hover:text-cyan-400 transition-colors">5. Order Qty %</label>
                                     <div className="flex items-center gap-2">
                                         <input
                                             type="number"
-                                            step="0.05"
-                                            value={tempTriggerPrice}
-                                            onChange={(e) => setTempTriggerPrice(e.target.value)}
-                                            onBlur={(e) => onUpdateTriggerPrice(parseFloat(e.target.value) || 0)}
-                                            className="bg-transparent border-none text-[13px] font-bold text-red-400 w-full focus:outline-none [&::-webkit-inner-spin-button]:appearance-none"
-                                            placeholder="Pts"
+                                            value={tempSlicePercentage}
+                                            onChange={(e) => setTempSlicePercentage(e.target.value)}
+                                            onBlur={(e) => onUpdateSlicePercentage(parseInt(e.target.value) || 0)}
+                                            className="bg-transparent border-none text-[13px] font-bold text-cyan-400 w-full focus:outline-none [&::-webkit-inner-spin-button]:appearance-none"
+                                            placeholder="%"
                                         />
                                         <button
-                                            onClick={() => onUpdateTriggerPrice(parseFloat(tempTriggerPrice) || 0)}
-                                            className={cn("text-[9px] font-bold px-2 py-1 rounded transition-colors", parseFloat(tempTriggerPrice) !== triggerPriceValue ? "bg-red-600 text-white" : "bg-white/10 text-white/30")}
+                                            onClick={() => onUpdateSlicePercentage(parseInt(tempSlicePercentage) || 0)}
+                                            className={cn("text-[9px] font-bold px-2 py-1 rounded transition-colors", parseInt(tempSlicePercentage) !== slicePercentage ? "bg-cyan-600 text-white" : "bg-white/10 text-white/30")}
                                         >
                                             SET
                                         </button>
                                     </div>
-                                    <p className="text-[9px] text-white/30 leading-tight">Sent in JSON Payload (0 = disabled).</p>
+                                    <p className="text-[9px] text-white/30 leading-tight">Slice percentage for auto orders.</p>
+                                </div>
+
+                                {/* 6. Sell Vol Threshold */}
+                                <div className="bg-white/5 border border-white/5 rounded p-2 flex flex-col gap-1.5 hover:border-rose-500/30 transition-colors group">
+                                    <label className="text-[9px] text-white/40 uppercase font-black tracking-widest group-hover:text-rose-400 transition-colors">6. Sell Vol Threshold</label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            value={tempSellVolThreshold}
+                                            onChange={(e) => setTempSellVolThreshold(e.target.value)}
+                                            onBlur={(e) => onUpdateSellVolThreshold(parseInt(e.target.value) || 0)}
+                                            className="bg-transparent border-none text-[13px] font-bold text-rose-400 w-full focus:outline-none [&::-webkit-inner-spin-button]:appearance-none"
+                                            placeholder="Qty"
+                                        />
+                                        <button
+                                            onClick={() => onUpdateSellVolThreshold(parseInt(tempSellVolThreshold) || 0)}
+                                            className={cn("text-[9px] font-bold px-2 py-1 rounded transition-colors", parseInt(tempSellVolThreshold) !== sellVolThreshold ? "bg-rose-600 text-white" : "bg-white/10 text-white/30")}
+                                        >
+                                            SET
+                                        </button>
+                                    </div>
+                                    <p className="text-[9px] text-white/30 leading-tight">Liquidation vol threshold.</p>
+                                </div>
+
+                                {/* 7. Max SL (Pts) */}
+                                <div className="bg-white/5 border border-white/5 rounded p-2 flex flex-col gap-1.5 hover:border-red-500/30 transition-colors group">
+                                    <label className="text-[9px] text-white/40 uppercase font-black tracking-widest group-hover:text-red-400 transition-colors">7. Max SL (Pts)</label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            step="0.05"
+                                            value={tempSellMaxSLPts}
+                                            onChange={(e) => setTempSellMaxSLPts(e.target.value)}
+                                            onBlur={(e) => onUpdateSellMaxSLPts(parseFloat(e.target.value) || 0)}
+                                            className="bg-transparent border-none text-[13px] font-bold text-red-500 w-full focus:outline-none [&::-webkit-inner-spin-button]:appearance-none"
+                                            placeholder="Pts"
+                                        />
+                                        <button
+                                            onClick={() => onUpdateSellMaxSLPts(parseFloat(tempSellMaxSLPts) || 0)}
+                                            className={cn("text-[9px] font-bold px-2 py-1 rounded transition-colors", parseFloat(tempSellMaxSLPts) !== sellMaxSLPts ? "bg-red-600 text-white" : "bg-white/10 text-white/30")}
+                                        >
+                                            SET
+                                        </button>
+                                    </div>
+                                    <p className="text-[9px] text-white/30 leading-tight">Global sell stop loss.</p>
+                                </div>
+
+                                {/* 8. Trailing SL */}
+                                <div className="bg-white/5 border border-white/5 rounded p-2 flex flex-col justify-between hover:border-amber-500/30 transition-colors group">
+                                    <label className="text-[9px] text-white/40 uppercase font-black tracking-widest group-hover:text-amber-400 transition-colors">8. Trailing SL</label>
+                                    <button
+                                        onClick={() => onUpdateSellTrailing(!sellTrailing)}
+                                        className={cn(
+                                            "mt-auto w-full py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95",
+                                            sellTrailing ? "bg-amber-500 text-black shadow-amber-500/20" : "bg-white/5 text-white/30 border border-white/10"
+                                        )}
+                                    >
+                                        {sellTrailing ? 'ACTIVE' : 'OFF'}
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -853,7 +979,7 @@ const VerticalLayout = ({
                     className="flex h-full gap-4 pb-4 w-fit min-w-full" // Use w-fit to ensure scrollbar triggers correctly
                 >
                     {monitoredTokens.map(token => {
-                        const isAtm = token.index === globalIndex && parseFloat(token.strike) === atmStrike;
+                        const isAtm = atmStrikes[token.index] !== undefined && parseFloat(token.strike) === atmStrikes[token.index];
                         return (
                             <DraggableColumn
                                 key={token.id}

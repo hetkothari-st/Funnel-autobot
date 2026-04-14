@@ -1,1 +1,8 @@
 /node_modules
+/dist
+/dist-autobot
+megatrader_autobot/node_modules
+megatrader_autobot/dist
+.env
+*.local
+*.zip

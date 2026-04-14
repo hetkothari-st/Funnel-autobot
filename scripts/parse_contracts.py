@@ -79,7 +79,7 @@ if __name__ == "__main__":
     else:
         print("Warning: No valid (non-empty) BSEFO.xml found in known paths.")
     
-    out_file = r"c:\Users\SMARTTOUCH\Desktop\siddhu_bhaiya\src\contracts_nsefo.json"
+    out_file = r"c:\Users\SMARTTOUCH\Desktop\siddhu_bhaiya_automate_new_replica\siddhu_bhaiya_automate\src\contracts_nsefo.json"
     
     all_contracts = []
     

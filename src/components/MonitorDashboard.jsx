@@ -115,7 +115,8 @@ const MonitorDashboard = ({
 
     depthEvents, // Low-latency event bus
     isSidebarVisible, // New prop
-    onToggleSidebar // New prop
+    onToggleSidebar, // New prop
+    onSyncTokens // NEW: pass tokens + strategies up to App
 }) => {
     // --- Layout State is now controlled by Parent (App.jsx) ---
 
@@ -145,7 +146,7 @@ const MonitorDashboard = ({
     });
     const [autoOrderExecutionQty, setAutoOrderExecutionQty] = useState(() => {
         const saved = localStorage.getItem(`mt_auto_order_exec_qty_${id}`);
-        return saved ? JSON.parse(saved) : 50; // Default to a common lot size
+        return saved ? JSON.parse(saved) : 0; // 0 = use slice % calculation
     });
     const [targetTotalQty, setTargetTotalQty] = useState(() => {
         const saved = localStorage.getItem(`mt_target_total_qty_${id}`);
@@ -158,6 +159,22 @@ const MonitorDashboard = ({
     const [triggerPriceValue, setTriggerPriceValue] = useState(() => {
         const saved = localStorage.getItem(`mt_trigger_price_${id}`);
         return saved ? JSON.parse(saved) : 0;
+    });
+    const [slicePercentage, setSlicePercentage] = useState(() => {
+        const saved = localStorage.getItem(`mt_slice_percentage_${id}`);
+        return saved ? JSON.parse(saved) : 10;
+    });
+    const [sellVolThreshold, setSellVolThreshold] = useState(() => {
+        const saved = localStorage.getItem(`mt_sell_vol_threshold_${id}`);
+        return saved ? JSON.parse(saved) : 0;
+    });
+    const [sellMaxSLPts, setSellMaxSLPts] = useState(() => {
+        const saved = localStorage.getItem(`mt_sell_max_sl_pts_${id}`);
+        return saved ? JSON.parse(saved) : 0;
+    });
+    const [sellTrailing, setSellTrailing] = useState(() => {
+        const saved = localStorage.getItem(`mt_sell_trailing_${id}`);
+        return saved ? JSON.parse(saved) : false;
     });
 
     // --- Core Automation Refs ---
@@ -200,6 +217,22 @@ const MonitorDashboard = ({
         localStorage.setItem(`mt_trigger_price_${id}`, JSON.stringify(triggerPriceValue));
     }, [triggerPriceValue, id]);
 
+    useEffect(() => {
+        localStorage.setItem(`mt_slice_percentage_${id}`, JSON.stringify(slicePercentage));
+    }, [slicePercentage, id]);
+
+    useEffect(() => {
+        localStorage.setItem(`mt_sell_vol_threshold_${id}`, JSON.stringify(sellVolThreshold));
+    }, [sellVolThreshold, id]);
+
+    useEffect(() => {
+        localStorage.setItem(`mt_sell_max_sl_pts_${id}`, JSON.stringify(sellMaxSLPts));
+    }, [sellMaxSLPts, id]);
+
+    useEffect(() => {
+        localStorage.setItem(`mt_sell_trailing_${id}`, JSON.stringify(sellTrailing));
+    }, [sellTrailing, id]);
+
     // --- Subscription Management ---
     // Resubscribe on mount/reload if tokens exist
     useEffect(() => {
@@ -213,7 +246,53 @@ const MonitorDashboard = ({
         }
     }, [subscribe, monitoredTokens.length]); // Length check is proxy for list existence/reset
 
+    // --- Sync to Autobot (Parent) ---
+    // --- Listener for Settings Updates from Autobot (Bidirectional) ---
+    useEffect(() => {
+        const handleSettingsUpdate = (event) => {
+            const { type, monitorId, settings } = event.data;
+            if (type === 'UPDATE_MONITOR_SETTINGS' && monitorId === id) {
+                if (settings.autoOrderThreshold !== undefined) setAutoOrderThreshold(settings.autoOrderThreshold);
+                if (settings.slicePercentage !== undefined) setSlicePercentage(settings.slicePercentage);
+                if (settings.triggerPriceValue !== undefined) setTriggerPriceValue(settings.triggerPriceValue);
+                if (settings.sellVolThreshold !== undefined) setSellVolThreshold(settings.sellVolThreshold);
+                if (settings.sellMaxSLPts !== undefined) setSellMaxSLPts(settings.sellMaxSLPts);
+                if (settings.sellTrailing !== undefined) setSellTrailing(settings.sellTrailing);
+            }
+        };
+        window.addEventListener('message', handleSettingsUpdate);
+        return () => window.removeEventListener('message', handleSettingsUpdate);
+    }, [id]);
 
+    useEffect(() => {
+        if (!onSyncTokens) return;
+        const payload = monitoredTokens.map(t => ({
+            ...t,
+            monitorId: id,
+            autoOrderThreshold,
+            autoOrderExecutionQty: 0, // Always use slice % calculation
+            triggerPriceValue,
+            slicePercentage,
+            sellVolThreshold,
+            sellMaxSLPts,
+            sellTrailing
+        }));
+        // EVEN IF EMPTY: Send the monitor's base settings to sync the sidebar
+        const finalPayload = payload.length > 0 ? payload : [{
+            id: `base_${id}`,
+            monitorId: id,
+            autoOrderThreshold,
+            autoOrderExecutionQty: 0,
+            triggerPriceValue,
+            slicePercentage,
+            sellVolThreshold,
+            sellMaxSLPts,
+            sellTrailing,
+            tkn: null, // Dummy for base sync
+            symbol: `MONITOR ${id + 1} BASE`
+        }];
+        onSyncTokens(id, finalPayload);
+    }, [monitoredTokens, autoOrderThreshold, autoOrderExecutionQty, triggerPriceValue, slicePercentage, sellVolThreshold, sellMaxSLPts, sellTrailing, id, onSyncTokens]);
 
     // --- Direct Audio Link (Low Latency) ---
     useEffect(() => {
@@ -295,6 +374,7 @@ const MonitorDashboard = ({
                 sides.forEach(side => {
                     const internalSide = side === 'buy' ? 'bid' : 'ask';
                     const depths = depth.depths || [];
+
                     const qualifyingDepths = depths.filter(d => {
                         const qty = internalSide === 'bid' ? d.BQ : d.SQ;
                         return qty > 0; // Capture all valid quantities
@@ -321,77 +401,8 @@ const MonitorDashboard = ({
                         const isQtyHigher = observedQty > state.maxQty;
 
                         // 1. Independent Automation Trigger & Accumulation
-                        const autoLevelKey = `${item.id}_${side}_auto`; // Broadened key to side-level (not specific price) for total accumulation
-                        const autoState = priceLevels.current[autoLevelKey] || { lastOrderTime: 0 };
-                        const autoTimeDiff = now - autoState.lastOrderTime;
+                        // REMOVED: Execution logic migrated entirely to Autobot
 
-                        if (isAutomationEnabled && autoTimeDiff > 5000) { // 5s universal cooldown per side
-                            const accumKey = `${item.id}_${side}`;
-                            let currentAccum = activeAccumulations.current[accumKey];
-
-                            // Bypass timer if logic says 0
-                            const bypassTimer = !timerSeconds || timerSeconds <= 0 || !targetTotalQty || targetTotalQty <= 0;
-
-                            if (bypassTimer) {
-                                // Instant Execution (Legacy Behavior)
-                                if (observedQty >= autoOrderThreshold) {
-                                    console.log(`[MegaTrader] Auto-triggering order (Instant) for ${observedQty} @ ${price} (Signal Threshold: ${autoOrderThreshold}, Order Qty: ${autoOrderExecutionQty}, SL/Trigger: ${triggerPriceValue})`);
-                                    const details = {
-                                        index: item.index, strike: item.strike, type: item.type,
-                                        side, observedQty, price, time: new Date().toLocaleTimeString(),
-                                        timestamp: now, tokenId: item.id, tkn: item.tkn,
-                                        executionQty: autoOrderExecutionQty,
-                                        triggerPrice: triggerPriceValue > 0 ? Number((side === 'buy' ? priceVal - triggerPriceValue : priceVal + triggerPriceValue).toFixed(2)) : 0
-                                    };
-                                    megaTraderAPI.triggerOrder(details);
-                                    autoState.lastOrderTime = now;
-                                    priceLevels.current[autoLevelKey] = autoState;
-                                }
-                            } else {
-                                // Timer Sequence Logic
-                                if (!currentAccum && observedQty >= autoOrderThreshold) {
-                                    // Step A: Initial Trigger -> Start Timer
-                                    console.log(`[MegaTrader] Accumulation Timer Started for ${accumKey}. Signal: ${observedQty}. Target: ${targetTotalQty} in ${timerSeconds}s.`);
-
-                                    const timerId = setTimeout(() => {
-                                        // Step C: Expiration (Goal Missed)
-                                        console.log(`[MegaTrader] Timer Expired for ${accumKey}. Total Accumulated: ${activeAccumulations.current[accumKey]?.accumulatedQty}. Goal: ${targetTotalQty} Missed.`);
-                                        delete activeAccumulations.current[accumKey];
-                                    }, timerSeconds * 1000);
-
-                                    currentAccum = {
-                                        startTime: now,
-                                        accumulatedQty: observedQty, // Bank the first one
-                                        timerId: timerId
-                                    };
-                                    activeAccumulations.current[accumKey] = currentAccum;
-                                } else if (currentAccum) {
-                                    // Step B: Accumulating only meaningful quantities (>= user threshold)
-                                    // SEARCH TAG: task_allticks - Remove the "if (observedQty >= autoOrderThreshold)" wrapper below to include all micro-ticks
-                                    if (observedQty >= autoOrderThreshold) {
-                                        currentAccum.accumulatedQty += observedQty;
-                                        console.log(`[MegaTrader] Accumulating... Added: ${observedQty}. New Total: ${currentAccum.accumulatedQty}/${targetTotalQty}`);
-                                    }
-                                }
-                                if (currentAccum && currentAccum.accumulatedQty >= targetTotalQty) {
-                                    console.log(`[MegaTrader] Accumulation Goal Met for ${accumKey}! Total: ${currentAccum.accumulatedQty}. Targeting Execution Qty: ${autoOrderExecutionQty} with TriggerPrice: ${triggerPriceValue}`);
-
-                                    clearTimeout(currentAccum.timerId); // Stop the timer
-                                    delete activeAccumulations.current[accumKey]; // Reset for next signal
-
-                                    const details = {
-                                        index: item.index, strike: item.strike, type: item.type,
-                                        side, observedQty, price, time: new Date().toLocaleTimeString(),
-                                        timestamp: now, tokenId: item.id, tkn: item.tkn,
-                                        executionQty: autoOrderExecutionQty,
-                                        triggerPrice: triggerPriceValue > 0 ? Number((side === 'buy' ? priceVal - triggerPriceValue : priceVal + triggerPriceValue).toFixed(2)) : 0
-                                    };
-                                    megaTraderAPI.triggerOrder(details);
-                                    autoState.lastOrderTime = now;
-                                    priceLevels.current[autoLevelKey] = autoState;
-                                }
-                            }
-                        }
 
                         // 2. Visual Log Filter (Only evaluate if it meets the column threshold)
                         let shouldLog = false;
@@ -602,6 +613,14 @@ const MonitorDashboard = ({
                     onUpdateTimerSeconds={setTimerSeconds}
                     triggerPriceValue={triggerPriceValue}
                     onUpdateTriggerPrice={setTriggerPriceValue}
+                    slicePercentage={slicePercentage}
+                    onUpdateSlicePercentage={setSlicePercentage}
+                    sellVolThreshold={sellVolThreshold}
+                    onUpdateSellVolThreshold={setSellVolThreshold}
+                    sellMaxSLPts={sellMaxSLPts}
+                    onUpdateSellMaxSLPts={setSellMaxSLPts}
+                    sellTrailing={sellTrailing}
+                    onUpdateSellTrailing={setSellTrailing}
                 />
             )}
         </div>

@@ -12,6 +12,8 @@ const resolveWsUrl = () => {
         return envUrl;
     }
     if (typeof window !== 'undefined' && window.location) {
+        // In production the autobot is served at /autobot/ on the same origin
+        // WS endpoint is at /ws on the parent origin
         const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         return `${scheme}//${window.location.host}/ws`;
     }
@@ -20,7 +22,7 @@ const resolveWsUrl = () => {
 
 const WS_URL = resolveWsUrl();
 
-export const useMarketData = (enabled = true, wsCredential = null, onMessage = null, onDepthPacket = null) => {
+export const useMarketData = (enabled = true, onMessage = null, onDepthPacket = null) => {
     const [status, setStatus] = useState('disconnected');
     const [depthData, setDepthData] = useState({});
 
@@ -32,7 +34,6 @@ export const useMarketData = (enabled = true, wsCredential = null, onMessage = n
     const onMessageRef = useRef(onMessage);
     const onDepthPacketRef = useRef(onDepthPacket);
     const enabledRef = useRef(enabled);
-    const wsCredentialRef = useRef(wsCredential);
     const isLoggedIn = useRef(false);
     const isReady = useRef(false);
     const pendingSubs = useRef([]);
@@ -54,8 +55,7 @@ export const useMarketData = (enabled = true, wsCredential = null, onMessage = n
         onMessageRef.current = onMessage;
         onDepthPacketRef.current = onDepthPacket;
         enabledRef.current = enabled;
-        wsCredentialRef.current = wsCredential;
-    }, [onMessage, onDepthPacket, enabled, wsCredential]);
+    }, [onMessage, onDepthPacket, enabled]);
 
     const connect = useCallback(() => {
         if (ws.current) {
@@ -63,44 +63,38 @@ export const useMarketData = (enabled = true, wsCredential = null, onMessage = n
             ws.current.close();
         }
 
-        console.log('[WS] Connecting to:', WS_URL);
+        console.log('[WS-Bot] Connecting to:', WS_URL);
         setStatus('connecting');
         ws.current = new WebSocket(WS_URL);
 
         ws.current.onopen = () => {
-            console.log('[WS] WebSocket OPEN — sending Login...');
+            console.log('[WS-Bot] WebSocket OPEN — sending Login...');
             setStatus('connected');
             msgCountRef.current = 0;
             msgTypesRef.current = {};
-            const cred = wsCredentialRef.current || `autobot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+            const cred = `autobot_bot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
             const loginPayload = { Type: 'Login', Data: { LoginId: cred, Password: cred } };
-            console.log('[WS] Login payload:', JSON.stringify(loginPayload));
             ws.current.send(JSON.stringify(loginPayload));
         };
 
         ws.current.onmessage = (event) => {
             try {
                 msgCountRef.current++;
-                if (msgCountRef.current <= 5) {
-                    const msg = JSON.parse(event.data);
-                    console.log(`[WS] msg #${msgCountRef.current} type=${msg.Type}`);
-                }
-
                 const msg = JSON.parse(event.data);
                 const { Type, Data } = msg;
 
                 msgTypesRef.current[Type] = (msgTypesRef.current[Type] || 0) + 1;
-                if (msgCountRef.current % 100 === 0) {
-                    console.log(`[WS] msg #${msgCountRef.current} — totals:`, JSON.stringify(msgTypesRef.current));
+                if (msgCountRef.current <= 5) {
+                    console.log(`[WS-Bot] msg #${msgCountRef.current} type=${Type}`);
                 }
 
-                // Activate session on first usable message (handles brokers that don't send Login response)
+                // Activate session on first usable message
                 if (!isReady.current) {
                     if (Type === 'Login' && Data?.Error) {
-                        console.error('[WS] LOGIN FAILED:', Data.Error);
+                        console.error('[WS-Bot] LOGIN FAILED:', Data.Error);
                         return;
                     }
-                    console.log('[WS] Session ACTIVE (triggered by msg type:', Type + ')');
+                    console.log('[WS-Bot] Session ACTIVE (triggered by msg type:', Type + ')');
                     isLoggedIn.current = true;
                     isReady.current = true;
 
@@ -156,7 +150,7 @@ export const useMarketData = (enabled = true, wsCredential = null, onMessage = n
                                 })
                             );
                         }
-                    }, 3000);
+                    }, 10000);
 
                     if (Type === 'Login') return;
                 }
@@ -189,12 +183,12 @@ export const useMarketData = (enabled = true, wsCredential = null, onMessage = n
                     return;
                 }
 
-                // Telemetry Log every 5 seconds
+                // Telemetry
                 if (Date.now() - lastTelemetry.current > 5000) {
                     const stats = packetRates.current;
                     const total = Object.values(stats).reduce((a, b) => a + b, 0);
                     if (total > 0) {
-                        console.log('[WS] 5s Traffic Report:', JSON.stringify(stats));
+                        console.log('[WS-Bot] 5s Traffic Report:', JSON.stringify(stats));
                     }
                     packetRates.current = {};
                     lastTelemetry.current = Date.now();
@@ -205,12 +199,12 @@ export const useMarketData = (enabled = true, wsCredential = null, onMessage = n
 
                 if (onMessageRef.current) onMessageRef.current(Type, Data);
             } catch (err) {
-                console.error('WS Message Error:', err);
+                console.error('WS-Bot Message Error:', err);
             }
         };
 
         ws.current.onclose = (event) => {
-            console.warn(`[WS] Closed: ${event.code} - ${event.reason || 'Abnormal Closure'}`);
+            console.warn(`[WS-Bot] Closed: ${event.code} - ${event.reason || 'None'}`);
             setStatus('disconnected');
             isLoggedIn.current = false;
             isReady.current = false;
@@ -220,7 +214,7 @@ export const useMarketData = (enabled = true, wsCredential = null, onMessage = n
             if (handshakeTimeout.current) clearTimeout(handshakeTimeout.current);
 
             if (enabledRef.current) {
-                reconnectTimeout.current = setTimeout(connect, 2000);
+                reconnectTimeout.current = setTimeout(connect, 5000);
             }
         };
 
