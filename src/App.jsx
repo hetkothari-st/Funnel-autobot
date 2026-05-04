@@ -133,6 +133,17 @@ const App = () => {
         syncToAutobot();
     }, [syncToAutobot]);
 
+    // Re-sync when autobot signals it's ready (catches tokens added before terminal was opened)
+    useEffect(() => {
+        const handleAutobotReady = (event) => {
+            if (event.data?.type === 'AUTOBOT_READY') {
+                syncToAutobot();
+            }
+        };
+        window.addEventListener('message', handleAutobotReady);
+        return () => window.removeEventListener('message', handleAutobotReady);
+    }, [syncToAutobot]);
+
     // --- Forward depth data to Autobot iframe ---
     useEffect(() => {
         if (!isAutobotVisible) return;

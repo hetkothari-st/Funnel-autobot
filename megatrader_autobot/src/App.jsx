@@ -529,6 +529,8 @@ function App() {
       }
     };
     window.addEventListener('message', handleSync);
+    // Tell parent we're ready — parent will re-send current tokens
+    window.parent.postMessage({ type: 'AUTOBOT_READY' }, '*');
     return () => window.removeEventListener('message', handleSync);
   }, []);
 
