@@ -2,7 +2,7 @@ class MegaTraderAPI {
     constructor() {
         // API Configuration - currently pointing to placeholder/local for testing
         // Update this URL with the actual MegaTrader endpoint when available
-        this.baseUrl = ' http://192.168.6.164:16006';
+        this.baseUrl = '/megatrader-api';
         this.loginId = 'DILIP';
         this.password = 'a@4444444444';
 

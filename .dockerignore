@@ -1,0 +1,9 @@
+node_modules
+megatrader_autobot/node_modules
+dist
+dist-autobot
+megatrader_autobot/dist
+.git
+.env
+*.local
+*.log
