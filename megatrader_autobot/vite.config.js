@@ -1,11 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/autobot/' : '/',
   plugins: [react()],
   build: {
     outDir: 'dist',
-    base: '/autobot/',
   },
   server: {
     port: 5174,
@@ -30,4 +30,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))
