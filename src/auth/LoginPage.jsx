@@ -29,7 +29,7 @@ export default function LoginPage() {
             if (data.ok) {
                 login(
                     {
-                        email: data.user.username + '@funnel-op.app',
+                        email: data.user.username + '@funnel-autobot.app',
                         name: data.user.username,
                         picture: null,
                         provider: 'credentials',
@@ -61,14 +61,14 @@ export default function LoginPage() {
             <div className="relative w-full max-w-sm">
                 <div className="text-center mb-8">
                     <div className="inline-flex items-center gap-2 mb-4">
-                        <div className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
-                        <span className="text-[10px] font-black text-orange-400 uppercase tracking-[0.25em]">
-                            Live Market Monitor
+                        <div className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+                        <span className="text-[10px] font-black text-violet-400 uppercase tracking-[0.25em]">
+                            Automated Trading Terminal
                         </span>
                     </div>
                     <h1 className="text-6xl md:text-7xl font-black text-white tracking-tight leading-none">
                         FUNNEL
-                        <span className="bg-gradient-to-r from-orange-400 to-amber-400 bg-clip-text text-transparent"> OP</span>
+                        <span className="bg-gradient-to-r from-violet-400 to-purple-400 bg-clip-text text-transparent"> AUTOBOT</span>
                     </h1>
                     <p className="text-[13px] text-white/40 mt-4">
                         Sign in to continue
@@ -77,7 +77,7 @@ export default function LoginPage() {
 
                 <div className="bg-white/[0.03] border border-white/10 rounded-xl p-6 shadow-2xl">
                     <form onSubmit={handleSubmit} className="space-y-3">
-                        <div className="flex items-center gap-2 bg-white/[0.04] border border-white/10 rounded px-3 h-10 focus-within:border-orange-500/40 transition-colors">
+                        <div className="flex items-center gap-2 bg-white/[0.04] border border-white/10 rounded px-3 h-10 focus-within:border-violet-500/40 transition-colors">
                             <User size={14} className="text-white/30 flex-shrink-0" />
                             <input
                                 type="text"
@@ -89,7 +89,7 @@ export default function LoginPage() {
                                 className="bg-transparent border-none flex-1 text-[13px] text-white placeholder-white/20 focus:outline-none disabled:opacity-50 selection:bg-white/20 selection:text-white"
                             />
                         </div>
-                        <div className="flex items-center gap-2 bg-white/[0.04] border border-white/10 rounded px-3 h-10 focus-within:border-orange-500/40 transition-colors">
+                        <div className="flex items-center gap-2 bg-white/[0.04] border border-white/10 rounded px-3 h-10 focus-within:border-violet-500/40 transition-colors">
                             <Lock size={14} className="text-white/30 flex-shrink-0" />
                             <input
                                 type="password"
@@ -112,7 +112,7 @@ export default function LoginPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/40 text-orange-300 font-bold py-2.5 rounded text-[12px] uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            className="w-full bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/40 text-violet-300 font-bold py-2.5 rounded text-[12px] uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
                             {loading ? (
                                 <>
