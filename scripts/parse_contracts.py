@@ -68,7 +68,12 @@ def parse_csv_from_url(url, expiry_time):
 
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    out_file = os.path.normpath(os.path.join(script_dir, '..', 'megatrader_autobot', 'src', 'contracts_nsefo.json'))
+    root_dir = os.path.normpath(os.path.join(script_dir, '..'))
+
+    out_files = [
+        os.path.join(root_dir, 'src', 'contracts_nsefo.json'),
+        os.path.join(root_dir, 'megatrader_autobot', 'src', 'contracts_nsefo.json'),
+    ]
 
     all_contracts = []
 
@@ -82,7 +87,7 @@ if __name__ == "__main__":
     print("Sorting all contracts by expiry...")
     all_contracts.sort(key=lambda x: x['e'])
 
-    with open(out_file, 'w') as f:
-        json.dump(all_contracts, f)
-
-    print(f"Finished. Extracted {len(all_contracts)} total contracts to {out_file}")
+    for out_file in out_files:
+        with open(out_file, 'w') as f:
+            json.dump(all_contracts, f)
+        print(f"Written {len(all_contracts)} contracts to {out_file}")

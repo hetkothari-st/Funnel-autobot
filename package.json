@@ -4,9 +4,9 @@
     "version": "1.0.0",
     "type": "module",
     "scripts": {
-        "dev": "vite",
+        "dev": "python scripts/parse_contracts.py && vite",
         "start": "node server/index.js",
-        "build": "vite build",
+        "build": "python scripts/parse_contracts.py && vite build",
         "preview": "vite preview"
     },
     "dependencies": {
