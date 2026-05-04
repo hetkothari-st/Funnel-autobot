@@ -22,6 +22,8 @@ export const useAutomationEngine = ({
     const priceLevels = useRef({});
     const lastProcessedTimes = useRef({});
     const engineStartTime = useRef(0);
+    // Tracks in-flight qty changes not yet reflected in React positions state
+    const localQtyRef = useRef({});
 
     // Settings refs
     const settingsRef = useRef({});
@@ -44,6 +46,11 @@ export const useAutomationEngine = ({
     useEffect(() => {
         latestDepthData.current = depthData;
     }, [depthData]);
+
+    // Reset in-flight tracker whenever React positions state updates
+    useEffect(() => {
+        localQtyRef.current = {};
+    }, [positions]);
 
     useEffect(() => {
         if (isAutomationEnabled) {
@@ -257,9 +264,13 @@ export const useAutomationEngine = ({
                                     ? `${item.tkn}_${item.monitorId}` : item.tkn;
                                 const existingPos = (settingsRef.current.positions || {})[ePosKey];
 
-                                // Block direct short selling — only sell what is already bought
-                                if (side === 'sell' && (!existingPos || existingPos.qty <= 0)) {
-                                    console.log(`[Autobot] SHORT SELL BLOCKED: No long position in ${item.index} ${item.strike} ${item.type}`);
+                                // Effective qty = React state + in-flight orders not yet reflected in state
+                                const reactQty = existingPos?.qty || 0;
+                                const effectiveQty = reactQty + (localQtyRef.current[ePosKey] || 0);
+
+                                // Block direct short selling — only sell what is already bought (including in-flight buys)
+                                if (side === 'sell' && effectiveQty <= 0) {
+                                    console.log(`[Autobot] SHORT SELL BLOCKED: effectiveQty=${effectiveQty} for ${item.index} ${item.strike} ${item.type}`);
                                     return;
                                 }
 
@@ -293,6 +304,8 @@ export const useAutomationEngine = ({
 
                                     autoState.lastOrderTime = Date.now();
                                     priceLevels.current[priceCooldownKey] = Date.now();
+                                    // Update in-flight tracker synchronously so next poll sees correct effective qty
+                                    localQtyRef.current[ePosKey] = (localQtyRef.current[ePosKey] || 0) + (side === 'buy' ? actualExecutionQty : -actualExecutionQty);
                                     console.log(`[Autobot] Firing | Observed:${observedQty} >= Threshold:${tokenThreshold} | Qty:${actualExecutionQty} Price:${executionPrice}`);
 
                                     const tokenTriggerValue = item.triggerPriceValue !== undefined ? item.triggerPriceValue : triggerPriceValue;
