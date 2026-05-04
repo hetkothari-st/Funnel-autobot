@@ -3,7 +3,7 @@ class MegaTraderAPI {
         // Use relative path so Vite proxy routes it correctly from any machine on the network
         this.baseUrl = '/megatrader-api';
         this.loginId = 'KARAN';
-        this.password = 'a11111111111';
+        this.password = 'a22222222222';
 
         // Session state
         this.uniqueId = 0;
