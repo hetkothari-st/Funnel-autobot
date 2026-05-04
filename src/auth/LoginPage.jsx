@@ -1,97 +1,135 @@
 import React, { useState } from 'react';
+import { Lock, User, AlertCircle, Loader2 } from 'lucide-react';
+import { useAuth } from './AuthContext';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+    const { login } = useAuth();
+    const [username, setUsername] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-    try {
-      const { login } = await import('./AuthContext').then((m) => ({ login: null }));
-      // Use fetch directly since we can't call hooks here
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Login failed');
-      localStorage.setItem('funnel_autobot_auth_user', JSON.stringify(data.user));
-      localStorage.setItem('funnel_autobot_session_token', data.sessionToken);
-      window.location.reload();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        if (!username.trim() || !password.trim()) {
+            setError('Please enter both username and password.');
+            return;
+        }
 
-  return (
-    <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-xl font-black mx-auto mb-4 shadow-lg shadow-emerald-500/20">
-            FA
-          </div>
-          <h1 className="text-2xl font-black text-white tracking-tight">FUNNEL AUTOBOT</h1>
-          <p className="text-white/30 text-xs mt-1">Automated Trading Terminal</p>
-        </div>
+        setLoading(true);
+        try {
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username.trim(), password: password.trim() }),
+            });
+            const data = await res.json();
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full px-4 py-3 bg-white/[0.05] border border-white/10 rounded-lg text-white text-sm placeholder-white/20 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all"
+            if (data.ok) {
+                login(
+                    {
+                        email: data.user.username + '@funnel-op.app',
+                        name: data.user.username,
+                        picture: null,
+                        provider: 'credentials',
+                    },
+                    data.sessionToken
+                );
+            } else {
+                setError(data.error || 'Login failed.');
+            }
+        } catch (err) {
+            console.error('[login] request failed:', err);
+            setError('Could not reach the server. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="min-h-screen w-full bg-[#0a0a0e] text-white flex items-center justify-center p-4">
+            <div
+                className="absolute inset-0 opacity-[0.03] pointer-events-none"
+                style={{
+                    backgroundImage:
+                        'linear-gradient(rgba(255,255,255,.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.5) 1px, transparent 1px)',
+                    backgroundSize: '24px 24px',
+                }}
             />
-          </div>
-          <div>
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full px-4 py-3 bg-white/[0.05] border border-white/10 rounded-lg text-white text-sm placeholder-white/20 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all"
-            />
-          </div>
 
-          {error && (
-            <div className="text-red-400 text-xs bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-              {error}
+            <div className="relative w-full max-w-sm">
+                <div className="text-center mb-8">
+                    <div className="inline-flex items-center gap-2 mb-4">
+                        <div className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
+                        <span className="text-[10px] font-black text-orange-400 uppercase tracking-[0.25em]">
+                            Live Market Monitor
+                        </span>
+                    </div>
+                    <h1 className="text-6xl md:text-7xl font-black text-white tracking-tight leading-none">
+                        FUNNEL
+                        <span className="bg-gradient-to-r from-orange-400 to-amber-400 bg-clip-text text-transparent"> OP</span>
+                    </h1>
+                    <p className="text-[13px] text-white/40 mt-4">
+                        Sign in to continue
+                    </p>
+                </div>
+
+                <div className="bg-white/[0.03] border border-white/10 rounded-xl p-6 shadow-2xl">
+                    <form onSubmit={handleSubmit} className="space-y-3">
+                        <div className="flex items-center gap-2 bg-white/[0.04] border border-white/10 rounded px-3 h-10 focus-within:border-orange-500/40 transition-colors">
+                            <User size={14} className="text-white/30 flex-shrink-0" />
+                            <input
+                                type="text"
+                                value={username}
+                                onChange={(e) => setUsername(e.target.value)}
+                                placeholder="Username"
+                                autoComplete="username"
+                                disabled={loading}
+                                className="bg-transparent border-none flex-1 text-[13px] text-white placeholder-white/20 focus:outline-none disabled:opacity-50 selection:bg-white/20 selection:text-white"
+                            />
+                        </div>
+                        <div className="flex items-center gap-2 bg-white/[0.04] border border-white/10 rounded px-3 h-10 focus-within:border-orange-500/40 transition-colors">
+                            <Lock size={14} className="text-white/30 flex-shrink-0" />
+                            <input
+                                type="password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                placeholder="Password"
+                                autoComplete="current-password"
+                                disabled={loading}
+                                className="bg-transparent border-none flex-1 text-[13px] text-white placeholder-white/20 focus:outline-none disabled:opacity-50 selection:bg-white/20 selection:text-white"
+                            />
+                        </div>
+
+                        {error && (
+                            <div className="flex items-center gap-2 text-[11px] text-red-400 bg-red-500/10 border border-red-500/20 rounded px-3 py-2">
+                                <AlertCircle size={12} />
+                                <span>{error}</span>
+                            </div>
+                        )}
+
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="w-full bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/40 text-orange-300 font-bold py-2.5 rounded text-[12px] uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                            {loading ? (
+                                <>
+                                    <Loader2 size={14} className="animate-spin" />
+                                    Signing in...
+                                </>
+                            ) : (
+                                'Sign in'
+                            )}
+                        </button>
+                    </form>
+                </div>
+
+                <p className="text-center text-[10px] text-white/25 mt-4">
+                    Contact your administrator for access credentials.
+                </p>
             </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-sm rounded-lg hover:from-emerald-500 hover:to-teal-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20"
-          >
-            {loading ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Signing in...
-              </span>
-            ) : (
-              'Sign In'
-            )}
-          </button>
-        </form>
-
-        <p className="text-center text-white/10 text-[10px] mt-8">Funnel Autobot v1.0</p>
-      </div>
-    </div>
-  );
+        </div>
+    );
 }

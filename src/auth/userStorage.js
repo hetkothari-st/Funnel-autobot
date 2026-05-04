@@ -1,55 +1,44 @@
-const PREFIXES = ['mt_', 'autobot_'];
+const APP_PREFIXES = ['mt_', 'vl_', 'nifty_baseline'];
+
+let currentNamespace = null;
+let installed = false;
+
+const shouldNamespace = (key) => {
+    if (!currentNamespace || typeof key !== 'string') return false;
+    return APP_PREFIXES.some((p) => key.startsWith(p));
+};
+
+const rewrite = (key) => `u:${currentNamespace}:${key}`;
 
 export function installUserStorageShim() {
-  const original = {
-    getItem: Storage.prototype.getItem,
-    setItem: Storage.prototype.setItem,
-    removeItem: Storage.prototype.removeItem,
-  };
+    if (installed) return;
+    if (typeof window === 'undefined' || !window.localStorage) return;
 
-  function getUserPrefix() {
-    try {
-      const raw = original.getItem.call(localStorage, 'funnel_autobot_auth_user');
-      if (!raw) return null;
-      const user = JSON.parse(raw);
-      return user?.email ? `__${user.email}__` : null;
-    } catch {
-      return null;
-    }
-  }
+    const proto = Object.getPrototypeOf(window.localStorage);
+    const rawGet = proto.getItem;
+    const rawSet = proto.setItem;
+    const rawRemove = proto.removeItem;
 
-  function needsPrefix(key) {
-    return PREFIXES.some((p) => key.startsWith(p));
-  }
+    proto.getItem = function (key) {
+        if (shouldNamespace(key)) return rawGet.call(this, rewrite(key));
+        return rawGet.call(this, key);
+    };
+    proto.setItem = function (key, value) {
+        if (shouldNamespace(key)) return rawSet.call(this, rewrite(key), value);
+        return rawSet.call(this, key, value);
+    };
+    proto.removeItem = function (key) {
+        if (shouldNamespace(key)) return rawRemove.call(this, rewrite(key));
+        return rawRemove.call(this, key);
+    };
 
-  Storage.prototype.getItem = function (key) {
-    if (needsPrefix(key)) {
-      const prefix = getUserPrefix();
-      if (prefix) {
-        const val = original.getItem.call(this, prefix + key);
-        if (val !== null) return val;
-      }
-    }
-    return original.getItem.call(this, key);
-  };
+    installed = true;
+}
 
-  Storage.prototype.setItem = function (key, value) {
-    if (needsPrefix(key)) {
-      const prefix = getUserPrefix();
-      if (prefix) {
-        return original.setItem.call(this, prefix + key, value);
-      }
-    }
-    return original.setItem.call(this, key, value);
-  };
+export function setUserNamespace(ns) {
+    currentNamespace = ns ? String(ns).replace(/[^a-zA-Z0-9@._-]/g, '_') : null;
+}
 
-  Storage.prototype.removeItem = function (key) {
-    if (needsPrefix(key)) {
-      const prefix = getUserPrefix();
-      if (prefix) {
-        return original.removeItem.call(this, prefix + key);
-      }
-    }
-    return original.removeItem.call(this, key);
-  };
+export function getUserNamespace() {
+    return currentNamespace;
 }

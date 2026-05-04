@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -13,66 +14,71 @@ const PORT = process.env.PORT || 8080;
 const BROKER_WS = process.env.BROKER_WS || 'ws://115.242.15.134:19101';
 const MEGATRADER_API = process.env.MEGATRADER_API_URL || 'http://192.168.6.164:16006';
 
-// Supabase config
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://ltcmymgikqjdtspkzzip.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0Y215bWdpa3FqZHRzcGt6emlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk4MTgxNjMsImV4cCI6MjA2NTM5NDE2M30.803s7RDe7WlSzFkSvMaqdbIsKMcjh3mGYaBqBnHEZJM';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
 
-// Session management (in-memory)
+// Session management (in-memory) — keyed by username
 const activeSessions = new Map();
+
+async function validateCredentials(username, password) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    console.error('[auth] SUPABASE_URL or SUPABASE_SERVICE_KEY not configured');
+    return { ok: false, error: 'Server auth not configured. Set SUPABASE_URL and SUPABASE_SERVICE_KEY env vars.' };
+  }
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/app_users?username=eq.${encodeURIComponent(username)}&is_active=eq.true&select=username,password`;
+    const res = await fetch(url, {
+      headers: {
+        'apikey': SUPABASE_SERVICE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!res.ok) return { ok: false, error: 'Authentication service unavailable.' };
+    const rows = await res.json();
+    if (rows.length === 0) return { ok: false, error: 'Invalid username or password.' };
+    if (rows[0].password !== password) return { ok: false, error: 'Invalid username or password.' };
+    return { ok: true, user: { username: rows[0].username } };
+  } catch (err) {
+    console.error('[auth] Supabase error:', err.message);
+    return { ok: false, error: 'Authentication service error. Try again.' };
+  }
+}
 
 // --- Auth endpoints ---
 app.post('/api/login', async (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.json({ ok: false, error: 'Username and password are required.' });
 
-  try {
-    const response = await fetch(
-      `${SUPABASE_URL}/rest/v1/allowed_users?select=*&email=eq.${encodeURIComponent(email)}`,
-      {
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`,
-        },
-      }
-    );
-    const users = await response.json();
-    if (!users || users.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
+  const result = await validateCredentials(username, password);
+  if (!result.ok) return res.json(result);
 
-    const user = users[0];
-    if (user.password !== password) return res.status(401).json({ error: 'Invalid credentials' });
-
-    const sessionToken = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-
-    // Replace existing session for this user (allows re-login after refresh)
-    for (const [token, session] of activeSessions.entries()) {
-      if (session.email === email) {
-        activeSessions.delete(token);
-      }
-    }
-    activeSessions.set(sessionToken, { email, name: user.name || email, loginAt: Date.now() });
-
-    res.json({
-      user: { email, name: user.name || email },
-      sessionToken,
-    });
-  } catch (err) {
-    console.error('Login error:', err);
-    res.status(500).json({ error: 'Server error' });
-  }
+  const sessionToken = crypto.randomBytes(32).toString('hex');
+  activeSessions.set(username, { sessionToken, connectedAt: Date.now() });
+  console.log(`[auth] Login SUCCESS for ${username}`);
+  return res.json({ ok: true, user: result.user, sessionToken });
 });
 
 app.post('/api/logout', (req, res) => {
-  const token = req.headers['x-session-token'];
-  if (token) activeSessions.delete(token);
+  const { sessionToken } = req.body || {};
+  for (const [username, session] of activeSessions) {
+    if (session.sessionToken === sessionToken) {
+      activeSessions.delete(username);
+      break;
+    }
+  }
   res.json({ ok: true });
 });
 
-app.get('/api/validate-session', (req, res) => {
-  const token = req.headers['x-session-token'];
-  if (!token) return res.status(401).json({ error: 'No token' });
-  const session = activeSessions.get(token);
-  if (!session) return res.status(401).json({ error: 'Invalid session' });
-  res.json({ user: { email: session.email, name: session.name } });
+app.post('/api/validate-session', (req, res) => {
+  const { sessionToken } = req.body || {};
+  if (!sessionToken) return res.json({ ok: false });
+  for (const [username, session] of activeSessions) {
+    if (session.sessionToken === sessionToken) {
+      return res.json({ ok: true, user: { username } });
+    }
+  }
+  return res.json({ ok: false });
 });
 
 // --- Megatrader API proxy ---
