@@ -358,7 +358,7 @@ export const useAutomationEngine = ({
             clearInterval(pollInterval);
             priceLevels.current = {};
         };
-    }, [monitoredTokens, isAutomationEnabled, positions]); // restart if positions list changes
+    }, [monitoredTokens, isAutomationEnabled]); // NOTE: positions intentionally excluded — engine reads via settingsRef.current so cooldowns survive position updates
 
     return {};
 };
