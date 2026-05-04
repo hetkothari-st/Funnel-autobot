@@ -548,6 +548,7 @@ function App() {
 
   // --- Automation Settings (Staging) ---
   const [isAutomationEnabled, setIsAutomationEnabled] = useState(false);
+  const [allowNonZeroDecimals, setAllowNonZeroDecimals] = useState(false);
   const [stagedThreshold, setStagedThreshold] = useState(15000);
   const [stagedSlicePercent, setStagedSlicePercent] = useState(10);
   const [stagedSLOffset, setStagedSLOffset] = useState(0);
@@ -790,6 +791,7 @@ function App() {
     triggerPriceValue: appliedSettings.slOffset,
     sellVolThreshold: appliedSettings.sellVolThreshold,
     sellMaxSLPts: appliedSettings.sellSL,
+    allowNonZeroDecimals,
     onLogEvent: addLogEvent,
     status
   });
@@ -1115,6 +1117,19 @@ function App() {
               </span>
             </div>
           </div>
+
+          <button
+            onClick={() => setAllowNonZeroDecimals(prev => !prev)}
+            title={allowNonZeroDecimals ? "All prices allowed — click to restrict to .00 only" : "Only .00 prices — click to allow all prices"}
+            className={cn(
+              "flex items-center gap-2 px-4 py-1.5 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all duration-300 border",
+              allowNonZeroDecimals
+                ? "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20"
+                : "bg-white/5 text-white/40 border-white/10 hover:bg-white/10 hover:text-white/60"
+            )}
+          >
+            {allowNonZeroDecimals ? "All Prices" : "Strict .00"}
+          </button>
 
           <button
             onClick={toggleEngine}

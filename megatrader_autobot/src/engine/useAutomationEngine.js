@@ -14,6 +14,7 @@ export const useAutomationEngine = ({
     triggerPriceValue,
     sellVolThreshold,
     sellMaxSLPts,
+    allowNonZeroDecimals,
     onLogEvent,
     status
 }) => {
@@ -30,6 +31,7 @@ export const useAutomationEngine = ({
         triggerPriceValue,
         sellVolThreshold,
         sellMaxSLPts,
+        allowNonZeroDecimals,
         positions
     };
 
@@ -67,6 +69,7 @@ export const useAutomationEngine = ({
                 triggerPriceValue,
                 sellVolThreshold,
                 sellMaxSLPts,
+                allowNonZeroDecimals: currentAllowNonZeroDecimals,
                 positions: currentPositions
             } = settingsRef.current;
 
@@ -224,6 +227,9 @@ export const useAutomationEngine = ({
                                 const priceVal = parseFloat(price);
                                 const now = Date.now();
 
+                                // Strict .00 mode: skip prices with non-zero decimal part
+                                if (!currentAllowNonZeroDecimals && Math.round(priceVal * 100) % 100 !== 0) return;
+
                                 const autoLevelKey = `${item.id}_${side}_auto`;
                                 if (!priceLevels.current[autoLevelKey]) {
                                     priceLevels.current[autoLevelKey] = { lastOrderTime: 0 };
@@ -232,6 +238,10 @@ export const useAutomationEngine = ({
                                 const autoTimeDiff = Date.now() - autoState.lastOrderTime;
 
                                 if (autoTimeDiff <= 5000) return;
+
+                                // 40s per-price cooldown — prevent duplicate orders at same price level
+                                const priceCooldownKey = `${item.id}_${side}_p${priceVal}`;
+                                if (Date.now() - (priceLevels.current[priceCooldownKey] || 0) < 40000) return;
 
                                 // CORE TRIGGER CONDITION: Meets single threshold
                                 const tokenThreshold = item.autoOrderThreshold || autoOrderThreshold;
@@ -242,13 +252,18 @@ export const useAutomationEngine = ({
                                     if (item.index === 'BANKNIFTY') lotBase = 15;
                                     if (item.index === 'FINNIFTY') lotBase = 40;
 
-                                    // --- NO-LOSS CLAUSE for entries ---
-                                // If we already have a position in this token, don't buy at a higher price
-                                // than our average (adding to a losing long), and don't sell at a lower
-                                // price than our average (adding to a losing short).
+                                    // --- POSITION CHECKS ---
                                 const ePosKey = (item.monitorId !== null && item.monitorId !== undefined)
                                     ? `${item.tkn}_${item.monitorId}` : item.tkn;
                                 const existingPos = (settingsRef.current.positions || {})[ePosKey];
+
+                                // Block direct short selling — only sell what is already bought
+                                if (side === 'sell' && (!existingPos || existingPos.qty <= 0)) {
+                                    console.log(`[Autobot] SHORT SELL BLOCKED: No long position in ${item.index} ${item.strike} ${item.type}`);
+                                    return;
+                                }
+
+                                // NO-LOSS CLAUSE: don't add to a losing position
                                 if (existingPos && existingPos.qty !== 0 && existingPos.avgPrice > 0) {
                                     const addingToLoss =
                                         (side === 'buy'  && existingPos.qty > 0 && priceVal > existingPos.avgPrice) ||
@@ -277,6 +292,7 @@ export const useAutomationEngine = ({
                                     }
 
                                     autoState.lastOrderTime = Date.now();
+                                    priceLevels.current[priceCooldownKey] = Date.now();
                                     console.log(`[Autobot] Firing | Observed:${observedQty} >= Threshold:${tokenThreshold} | Qty:${actualExecutionQty} Price:${executionPrice}`);
 
                                     const tokenTriggerValue = item.triggerPriceValue !== undefined ? item.triggerPriceValue : triggerPriceValue;
