@@ -22,8 +22,11 @@ export const useAutomationEngine = ({
     const priceLevels = useRef({});
     const lastProcessedTimes = useRef({});
     const engineStartTime = useRef(0);
-    // Tracks in-flight qty changes not yet reflected in React positions state
-    const localQtyRef = useRef({});
+    // Tracks in-flight SELL qty per posKey, not yet reflected in React positions state.
+    // Used to prevent overselling when multiple sell paths (Part A liquidation + Part B
+    // sell entry, or side='both' buy+sell on same poll) target the same position.
+    // In-flight BUYs are NOT credited here — that race produced negative qty before.
+    const pendingSellQty = useRef({});
 
     // Settings refs
     const settingsRef = useRef({});
@@ -47,9 +50,10 @@ export const useAutomationEngine = ({
         latestDepthData.current = depthData;
     }, [depthData]);
 
-    // Reset in-flight tracker whenever React positions state updates
+    // Reset pending-sell tracker whenever React positions state updates.
+    // Once positions reflects a confirmed fill, the in-flight delta has landed.
     useEffect(() => {
-        localQtyRef.current = {};
+        pendingSellQty.current = {};
     }, [positions]);
 
     useEffect(() => {
@@ -129,6 +133,10 @@ export const useAutomationEngine = ({
                         (async () => {
                             try {
                                 exitState.lastOrderTime = Date.now();
+                                // Register pending sell BEFORE await so concurrent Part B sell sees the commitment.
+                                if (qty > 0) {
+                                    pendingSellQty.current[posKey] = (pendingSellQty.current[posKey] || 0) + Math.abs(qty);
+                                }
                                 console.log(`[Autobot] LIQUIDATING | Vol:${obsOppQty} >= Thr:${mVolThreshold} | Exit ${posData.symbol}`);
 
                                 const details = {
@@ -178,6 +186,9 @@ export const useAutomationEngine = ({
                             (async () => {
                                 try {
                                     exitState.lastOrderTime = Date.now();
+                                    if (qty > 0) {
+                                        pendingSellQty.current[posKey] = (pendingSellQty.current[posKey] || 0) + Math.abs(qty);
+                                    }
                                     console.log(`[Autobot] SL HIT | Pnl:${pnlPts.toFixed(2)} <= -${mMaxSLPts} | Exit ${posData.symbol}`);
                                     const details = {
                                         index: posData.symbol.split(' ')[0], strike: posData.strike, type: posData.type,
@@ -259,39 +270,43 @@ export const useAutomationEngine = ({
                                     if (item.index === 'BANKNIFTY') lotBase = 15;
                                     if (item.index === 'FINNIFTY') lotBase = 40;
 
-                                    // --- POSITION CHECKS ---
-                                const ePosKey = (item.monitorId !== null && item.monitorId !== undefined)
-                                    ? `${item.tkn}_${item.monitorId}` : item.tkn;
-                                const existingPos = (settingsRef.current.positions || {})[ePosKey];
-
-                                // Effective qty = React state + in-flight orders not yet reflected in state
-                                const reactQty = existingPos?.qty || 0;
-                                const effectiveQty = reactQty + (localQtyRef.current[ePosKey] || 0);
-
-                                // Block direct short selling — only sell what is already bought (including in-flight buys)
-                                if (side === 'sell' && effectiveQty <= 0) {
-                                    console.log(`[Autobot] SHORT SELL BLOCKED: effectiveQty=${effectiveQty} for ${item.index} ${item.strike} ${item.type}`);
-                                    return;
-                                }
-
-                                // NO-LOSS CLAUSE: don't add to a losing position
-                                if (existingPos && existingPos.qty !== 0 && existingPos.avgPrice > 0) {
-                                    const addingToLoss =
-                                        (side === 'buy'  && existingPos.qty > 0 && priceVal > existingPos.avgPrice) ||
-                                        (side === 'sell' && existingPos.qty < 0 && priceVal < existingPos.avgPrice);
-                                    if (addingToLoss) {
-                                        console.log(`[Autobot] NO-LOSS CLAUSE: Skipping ${side.toUpperCase()} entry for ${item.index} ${item.strike} ${item.type} | Price:${priceVal} vs Avg:${existingPos.avgPrice.toFixed(2)}`);
-                                        return;
-                                    }
-                                }
-
-                                // Use lot size directly — no percentage calculation
+                                    // Compute execution qty up front — needed for the short-sell guard below.
                                     let actualExecutionQty;
                                     if (item.autoOrderExecutionQty) {
                                         actualExecutionQty = Number(item.autoOrderExecutionQty);
                                     } else {
                                         // autoOrderSlicePercentage is now a direct lot size value
                                         actualExecutionQty = Number(item.slicePercentage || autoOrderSlicePercentage || 65);
+                                    }
+
+                                    // --- POSITION CHECKS ---
+                                    const ePosKey = (item.monitorId !== null && item.monitorId !== undefined)
+                                        ? `${item.tkn}_${item.monitorId}` : item.tkn;
+                                    const existingPos = (settingsRef.current.positions || {})[ePosKey];
+                                    const reactQty = existingPos?.qty || 0;
+
+                                    // SHORT-SELL GUARD
+                                    // Sell only what is CONFIRMED long, minus pending sells already in flight
+                                    // (Part A liquidation, Part A SL, or earlier Part B sells this poll).
+                                    // In-flight BUYs do NOT credit toward sell capacity — that race produced negative qty.
+                                    if (side === 'sell') {
+                                        const pending = pendingSellQty.current[ePosKey] || 0;
+                                        const availableToSell = Math.max(0, reactQty) - pending;
+                                        if (availableToSell < actualExecutionQty) {
+                                            console.log(`[Autobot] SELL BLOCKED: availableToSell=${availableToSell} < ${actualExecutionQty} | reactQty=${reactQty} pending=${pending} for ${item.index} ${item.strike} ${item.type}`);
+                                            return;
+                                        }
+                                    }
+
+                                    // NO-LOSS CLAUSE: don't add to a losing position
+                                    if (existingPos && existingPos.qty !== 0 && existingPos.avgPrice > 0) {
+                                        const addingToLoss =
+                                            (side === 'buy'  && existingPos.qty > 0 && priceVal > existingPos.avgPrice) ||
+                                            (side === 'sell' && existingPos.qty < 0 && priceVal < existingPos.avgPrice);
+                                        if (addingToLoss) {
+                                            console.log(`[Autobot] NO-LOSS CLAUSE: Skipping ${side.toUpperCase()} entry for ${item.index} ${item.strike} ${item.type} | Price:${priceVal} vs Avg:${existingPos.avgPrice.toFixed(2)}`);
+                                            return;
+                                        }
                                     }
 
                                     const crossHardLimit = observedQty >= 100000;
@@ -304,8 +319,11 @@ export const useAutomationEngine = ({
 
                                     autoState.lastOrderTime = Date.now();
                                     priceLevels.current[priceCooldownKey] = Date.now();
-                                    // Update in-flight tracker synchronously so next poll sees correct effective qty
-                                    localQtyRef.current[ePosKey] = (localQtyRef.current[ePosKey] || 0) + (side === 'buy' ? actualExecutionQty : -actualExecutionQty);
+                                    // Register pending sell BEFORE await so concurrent sells (same poll, side='both', or
+                                    // Part A liquidation) see this commitment and back off.
+                                    if (side === 'sell') {
+                                        pendingSellQty.current[ePosKey] = (pendingSellQty.current[ePosKey] || 0) + actualExecutionQty;
+                                    }
                                     console.log(`[Autobot] Firing | Observed:${observedQty} >= Threshold:${tokenThreshold} | Qty:${actualExecutionQty} Price:${executionPrice}`);
 
                                     const tokenTriggerValue = item.triggerPriceValue !== undefined ? item.triggerPriceValue : triggerPriceValue;
