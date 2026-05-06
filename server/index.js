@@ -141,8 +141,23 @@ wss.on('connection', (clientWs) => {
   console.log('[WS] Client connected, opening upstream to broker...');
   const upstream = new WebSocket(BROKER_WS);
 
+  // Buffer client→upstream messages that arrive before upstream is OPEN.
+  // Without this, the client's Login payload (sent immediately on its onopen)
+  // is dropped because upstream is still CONNECTING.
+  const pendingToUpstream = [];
+  let upstreamReady = false;
+
   upstream.on('open', () => {
-    console.log('[WS] Upstream broker connected');
+    console.log(`[WS] Upstream broker connected (flushing ${pendingToUpstream.length} buffered msg)`);
+    upstreamReady = true;
+    while (pendingToUpstream.length > 0) {
+      const msg = pendingToUpstream.shift();
+      try {
+        upstream.send(msg);
+      } catch (e) {
+        console.error('[WS] Flush send error:', e.message);
+      }
+    }
   });
 
   upstream.on('message', (data) => {
@@ -162,14 +177,19 @@ wss.on('connection', (clientWs) => {
   });
 
   clientWs.on('message', (data) => {
-    if (upstream.readyState === WebSocket.OPEN) {
-      const text = typeof data === 'string' ? data : data.toString('utf8');
+    const text = typeof data === 'string' ? data : data.toString('utf8');
+    if (upstreamReady && upstream.readyState === WebSocket.OPEN) {
       upstream.send(text);
+    } else if (upstream.readyState === WebSocket.CONNECTING) {
+      pendingToUpstream.push(text);
     }
+    // else: upstream closed/closing — drop
   });
 
   clientWs.on('close', () => {
-    if (upstream.readyState === WebSocket.OPEN) upstream.close();
+    if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
+      upstream.close();
+    }
   });
 
   clientWs.on('error', (err) => {
