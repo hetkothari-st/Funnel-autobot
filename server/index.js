@@ -85,14 +85,23 @@ app.post('/api/validate-session', (req, res) => {
 app.all('/megatrader-api/*', async (req, res) => {
   const targetPath = req.originalUrl.replace(/^\/megatrader-api/, '');
   const targetUrl = `${MEGATRADER_API}${targetPath}`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
+    // Strip hop-by-hop and length/encoding headers — body is re-serialized so
+    // forwarding stale content-length makes Node fetch hang waiting for body.
     const headers = { ...req.headers };
     delete headers.host;
     delete headers.connection;
+    delete headers['content-length'];
+    delete headers['accept-encoding'];
+    delete headers['content-encoding'];
+    delete headers['transfer-encoding'];
 
     const fetchOpts = {
       method: req.method,
       headers,
+      signal: controller.signal,
     };
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       fetchOpts.body = JSON.stringify(req.body);
@@ -108,8 +117,15 @@ app.all('/megatrader-api/*', async (req, res) => {
       res.send(await upstream.text());
     }
   } catch (err) {
-    console.error('[API Proxy] Error:', err.message);
-    res.status(502).json({ error: 'API proxy error' });
+    const isTimeout = err.name === 'AbortError';
+    console.error(`[API Proxy] ${isTimeout ? 'TIMEOUT' : 'Error'} ${req.method} ${targetUrl}: ${err.message}`);
+    res.status(isTimeout ? 504 : 502).json({
+      Error: isTimeout
+        ? `Upstream timeout reaching ${MEGATRADER_API} — check network/whitelist`
+        : `Proxy error: ${err.message}`,
+    });
+  } finally {
+    clearTimeout(timeoutId);
   }
 });
 
